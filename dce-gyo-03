@@ -1,0 +1,281 @@
+<!DOCTYPE html><html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>DCE‑02 • LDraw Builder + Chat (Single‑File)</title>
+  <style>
+    :root{
+      --bg:#0c0f14; --panel:#11161d; --ink:#e8eef7; --muted:#9aa7b5; --accent:#6ee7ff; --ok:#7ef9a9; --warn:#ffcf6e; --danger:#ff7e7e; --line:#263241;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;background:linear-gradient(180deg,#0b0d11 0%, #0c1118 60%, #0b0f14 100%);color:var(--ink);}
+    .frame{display:grid;grid-template-rows:auto 1fr auto;min-height:100vh}
+    header{display:flex;gap:.75rem;align-items:center;justify-content:space-between;padding:.75rem .9rem;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0f141b,#0b0f14);position:sticky;top:0;z-index:5}
+    header h1{font-size:1rem;letter-spacing:.08em;margin:0;color:var(--ink)}
+    header .mini{display:flex;gap:.5rem;align-items:center}
+    .btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:.5rem .7rem;border-radius:.7rem;cursor:pointer;transition:transform .06s ease, background .2s;}
+    .btn:active{transform:translateY(1px)}
+    .btn.primary{border-color:#1f3346;box-shadow:0 0 0 1px #1f3346 inset}
+    .btn.small{padding:.35rem .55rem;font-size:.85rem}.main{display:grid;grid-template-rows:1fr auto;gap:.6rem;padding:.6rem}
+.stage{position:relative;border:1px solid var(--line);border-radius:1rem;overflow:hidden;background:#0b1016}
+canvas{display:block; width:100%; height:100%}
+.hud{position:absolute;left:.6rem;bottom:.6rem;display:flex;gap:.4rem;flex-wrap:wrap}
+.chip{background:#0f151d;border:1px solid var(--line);padding:.3rem .5rem;border-radius:.6rem;color:var(--muted);font-size:.78rem}
+
+.console{display:grid;grid-template-columns:1fr;gap:.6rem}
+.row{display:flex;gap:.6rem;flex-wrap:wrap}
+.card{flex:1 1 260px;min-width:260px;background:var(--panel);border:1px solid var(--line);border-radius:1rem;padding:.9rem}
+.title{display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;color:var(--muted);font-size:.8rem}
+input[type="text"], textarea{width:100%;background:#0d131b;border:1px solid var(--line);color:var(--ink);border-radius:.6rem;padding:.6rem;font-family:inherit}
+textarea{resize:vertical;min-height:64px}
+
+/* chat */
+.chat{display:grid;grid-template-rows:1fr auto;gap:.5rem;max-height:36vh}
+.log{border:1px solid var(--line);background:#0b1117;border-radius:.75rem;padding:.6rem;overflow:auto}
+.msg{display:grid;grid-template-columns:auto 1fr;gap:.5rem;align-items:start;margin:.25rem 0}
+.who{font-size:.72rem;color:var(--muted);padding:.15rem .45rem;border:1px solid var(--line);border-radius:.5rem}
+.who.you{color:#a5f3fc;border-color:#174657}
+.who.sys{color:#c7d2fe;border-color:#303464}
+.bubble{padding:.4rem .55rem;background:#0e151d;border:1px solid var(--line);border-radius:.6rem}
+
+.toolbar{display:flex;gap:.4rem;flex-wrap:wrap}
+.toolbar .btn{font-size:.8rem}
+
+/* small screens */
+@media (min-width:980px){
+  .console{grid-template-columns:1.2fr .8fr}
+}
+
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <header>
+      <h1>DCE‑02 · Dual‑Agent LDraw Console</h1>
+      <div class="mini">
+        <button class="btn small" id="btnDownloadGLB" title="Export current scene as GLB">Download GLB</button>
+        <button class="btn small" id="btnDownloadModel" title="Download raw LDraw file">Download .LDR</button>
+      </div>
+    </header><section class="main">
+  <div class="stage" id="stage">
+    <canvas id="viewport"></canvas>
+    <div class="hud" id="hud">
+      <span class="chip" id="chipModel">model: —</span>
+      <span class="chip" id="chipParts">parts: —</span>
+      <span class="chip" id="chipFaces">tris: —</span>
+      <span class="chip">drag = orbit · pinch = zoom</span>
+    </div>
+  </div>
+
+  <div class="console">
+    <div class="row">
+      <div class="card">
+        <div class="title">MODEL SOURCE</div>
+        <input id="modelUrl" type="text" placeholder="Paste any raw .ldr/.mpd/.dat URL (e.g. raw.githubusercontent.com/…)">
+        <div class="toolbar" style="margin-top:.5rem">
+          <button class="btn primary" id="btnLoad">Load Model</button>
+          <button class="btn" id="btnSample1">Sample: Mini House</button>
+          <button class="btn" id="btnSample2">Sample: Car</button>
+        </div>
+      </div>
+
+      <div class="card chat">
+        <div class="title">INNER / OUTER CHAT</div>
+        <div class="log" id="chatLog" aria-live="polite"></div>
+        <div class="row" style="gap:.4rem">
+          <input id="chatInput" type="text" placeholder="try: load <url> · explode 0.4 · bg #0d0 · reset · help"/>
+          <button class="btn primary" id="chatSend">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <div class="title">VIEW</div>
+        <div class="toolbar">
+          <button class="btn" data-cmd="explode 0">Explode 0</button>
+          <button class="btn" data-cmd="explode 0.25">Explode 0.25</button>
+          <button class="btn" data-cmd="explode 0.5">Explode 0.5</button>
+          <button class="btn" data-cmd="reset">Reset</button>
+          <button class="btn" data-cmd="spin on">Spin On</button>
+          <button class="btn" data-cmd="spin off">Spin Off</button>
+          <button class="btn" data-cmd="bg #0c0f14">Dark BG</button>
+          <button class="btn" data-cmd="bg #ffffff">Light BG</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="title">NOTES</div>
+        <textarea spellcheck="false" placeholder="Paste repo links here. This app streams any raw .ldr/.mpd/.dat from GitHub or elsewhere. Export GLB to move into other tools."></textarea>
+      </div>
+    </div>
+  </div>
+</section>
+
+  </div>  <!-- Three.js + helpers -->  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+    import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+    import { LDrawLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/LDrawLoader.js';
+    import { GLTFExporter } from 'https://unpkg.com/three@0.160.0/examples/jsm/exporters/GLTFExporter.js';
+
+    // ======= DOM =======
+    const canvas = document.getElementById('viewport');
+    const chipModel = document.getElementById('chipModel');
+    const chipParts = document.getElementById('chipParts');
+    const chipFaces = document.getElementById('chipFaces');
+    const modelUrlInput = document.getElementById('modelUrl');
+    const log = document.getElementById('chatLog');
+
+    const addMsg = (who, text) => {
+      const row = document.createElement('div'); row.className = 'msg';
+      const w = document.createElement('div'); w.className = 'who ' + (who==='YOU'?'you':'sys'); w.textContent = who;
+      const b = document.createElement('div'); b.className = 'bubble'; b.textContent = text; row.append(w,b); log.append(row); log.scrollTop = log.scrollHeight;
+    };
+
+    // ======= Three setup =======
+    const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    const stage = document.getElementById('stage');
+    function size(){
+      const r = stage.getBoundingClientRect();
+      renderer.setSize(r.width, r.height, false);
+      camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+    }
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0c0f14);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+    camera.position.set(45, 30, 45);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // lights
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x2b2b2b, 0.9); scene.add(hemi);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9); dir.position.set(10,20,10); scene.add(dir);
+
+    // grid + ground
+    const grid = new THREE.GridHelper(200, 20, 0x2a3342, 0x1c2633); grid.position.y = -0.01; scene.add(grid);
+
+    // LDraw loader
+    const loader = new LDrawLoader();
+    loader.separateObjects = true; // allow explode
+
+    let currentGroup = null; let currentUrl = null; let spin=false; let explodeFactor=0;
+
+    function clearModel(){
+      if(!currentGroup) return; scene.remove(currentGroup); currentGroup.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) { if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose()); else o.material.dispose(); }}); currentGroup = null; chipModel.textContent = 'model: —'; chipParts.textContent='parts: —'; chipFaces.textContent='tris: —';
+    }
+
+    async function loadModel(url){
+      addMsg('SYSTEM','Loading '+url);
+      return new Promise((resolve,reject)=>{
+        loader.load(url, (group)=>{
+          clearModel();
+          currentGroup = group;
+          currentUrl = url;
+          scene.add(group);
+          // center & scale
+          const box = new THREE.Box3().setFromObject(group);
+          const size = new THREE.Vector3(); box.getSize(size); const center = new THREE.Vector3(); box.getCenter(center);
+          group.position.sub(center);
+          const maxDim = Math.max(size.x,size.y,size.z); const s = 30 / (maxDim || 1); group.scale.setScalar(s);
+          camera.position.set(35, 25, 35); controls.target.set(0,0,0); controls.update();
+          // stats
+          let parts=0, tris=0; group.traverse(o=>{ if(o.isMesh){ parts++; tris += o.geometry.index? o.geometry.index.count/3 : o.geometry.attributes.position.count/3; }});
+          chipModel.textContent = 'model: '+(url.split('/').pop());
+          chipParts.textContent = 'parts: '+parts.toLocaleString();
+          chipFaces.textContent = 'tris: '+Math.round(tris).toLocaleString();
+          addMsg('SYSTEM','Loaded ✔');
+          resolve();
+        }, (xhr)=>{}, (err)=>{ addMsg('SYSTEM','Load error: '+err.message); reject(err); });
+      });
+    }
+
+    function setExplode(k){
+      explodeFactor = Math.max(0, Math.min(1, Number(k)||0));
+      if(!currentGroup) return;
+      currentGroup.traverse(o=>{
+        if(o.isMesh && o.userData && o.userData.ldrawKeys && o.userData.ldrawKeys.center){
+          const c = o.userData.ldrawKeys.center; // from loader
+          // move away from origin along vector from (0,0,0) to part center
+          const v = new THREE.Vector3(c.x, c.y, c.z).normalize().multiplyScalar(explodeFactor*12);
+          o.position.set(v.x,v.y,v.z);
+        }
+      });
+    }
+
+    function animate(){
+      requestAnimationFrame(animate);
+      if(currentGroup && spin){ currentGroup.rotation.y += 0.004; }
+      controls.update();
+      renderer.render(scene,camera);
+    }
+    animate();
+    size(); new ResizeObserver(size).observe(stage);
+
+    // ======= Commands =======
+    async function runCommand(input){
+      const s = input.trim(); if(!s) return;
+      addMsg('YOU', s);
+      const [cmd, ...rest] = s.split(/\s+/); const arg = rest.join(' ');
+      try{
+        switch(cmd.toLowerCase()){
+          case 'load': {
+            const url = arg || modelUrlInput.value.trim();
+            if(!/^https?:\/\//.test(url)) throw new Error('Provide a raw URL to .ldr/.mpd/.dat');
+            modelUrlInput.value = url; await loadModel(url); break; }
+          case 'explode': setExplode(parseFloat(rest[0]??'0')); addMsg('SYSTEM','explode → '+explodeFactor); break;
+          case 'bg': scene.background = new THREE.Color(arg||'#0c0f14'); renderer.setClearColor(scene.background); addMsg('SYSTEM','background → '+(arg||'#0c0f14')); break;
+          case 'reset': if(currentGroup){ currentGroup.rotation.set(0,0,0); setExplode(0); controls.reset(); } addMsg('SYSTEM','reset ✔'); break;
+          case 'spin': spin = (rest[0]||'on').toLowerCase()!=='off'; addMsg('SYSTEM','spin → '+(spin?'on':'off')); break;
+          case 'help': default:
+            addMsg('SYSTEM','Commands: load <url> · explode <0..1> · bg <#hex> · spin on|off · reset');
+        }
+      }catch(e){ addMsg('SYSTEM','Error: '+e.message); }
+    }
+
+    // UI wires
+    document.getElementById('btnLoad').onclick = ()=> runCommand('load');
+    document.getElementById('btnSample1').onclick = ()=> {
+      // Sample from three.js repo (stable public raw)
+      const u = 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/ldraw/officialLibrary/models/house.ldr';
+      modelUrlInput.value = u; runCommand('load '+u);
+    };
+    document.getElementById('btnSample2').onclick = ()=> {
+      const u = 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/ldraw/officialLibrary/models/car.ldr';
+      modelUrlInput.value = u; runCommand('load '+u);
+    };
+
+    // quick toolbar buttons
+    document.querySelectorAll('[data-cmd]').forEach(b=> b.addEventListener('click', ()=> runCommand(b.dataset.cmd)) );
+
+    // chat
+    const input = document.getElementById('chatInput');
+    document.getElementById('chatSend').onclick = ()=> { runCommand(input.value); input.value=''; input.focus(); };
+    input.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('chatSend').click(); } });
+
+    // downloads
+    document.getElementById('btnDownloadGLB').onclick = ()=>{
+      if(!currentGroup){ addMsg('SYSTEM','Nothing to export'); return; }
+      const exporter = new GLTFExporter();
+      exporter.parse(currentGroup, (gltf)=>{
+        const blob = new Blob([gltf instanceof ArrayBuffer? gltf : JSON.stringify(gltf)], {type: (gltf instanceof ArrayBuffer)? 'model/gltf-binary' : 'model/gltf+json'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (chipModel.textContent.replace('model: ','')||'model') + '.glb'; a.click(); URL.revokeObjectURL(a.href);
+      }, {binary:true});
+      addMsg('SYSTEM','Exporting GLB…');
+    };
+
+    document.getElementById('btnDownloadModel').onclick = async ()=>{
+      const url = currentUrl || modelUrlInput.value.trim();
+      if(!url){ addMsg('SYSTEM','No model URL'); return; }
+      const res = await fetch(url); const blob = await res.blob();
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = url.split('/').pop(); a.click(); URL.revokeObjectURL(a.href);
+      addMsg('SYSTEM','Downloaded raw model');
+    };
+
+    // greet
+    addMsg('SYSTEM','Welcome. Paste a raw .ldr/.mpd URL from your repo (e.g. https://raw.githubusercontent.com/hartswf0/ldrawExample/<branch>/<path>.ldr) then press Load, or try a Sample.');
+  </script></body>
+</html>
